@@ -1,6 +1,15 @@
 import networkx as nx
 from gurobipy import Model, GRB, quicksum
 from lib.Solver import Solver
+import os
+import os
+
+
+def indices_to_dense_binary_string(indices, length):
+    binary = ["0"] * length
+    for i in indices:
+        binary[i] = "1"
+    return " ".join(binary)
 
 class GurobiMIS(Solver):
     """
@@ -11,7 +20,7 @@ class GurobiMIS(Solver):
         params (dict): Dictionary containing solver parameters:
             - time_limit (int, optional): Time limit (in seconds) for the solver to run. Defaults to None.
     """
-    def __init__(self, G, params):
+    def __init__(self, G, G_name, params):
         """
         Initializes the GurobiMIS solver with the given graph and parameters.
 
@@ -20,13 +29,14 @@ class GurobiMIS(Solver):
             params (dict): Parameters for the solver, including optional time_limit.
         """
         self.G = G
+        self.graph_name = G_name
         self.time_limit = params.get("time_limit", None)
         self.solution = {}
         self.model = None
         self.solution_time = None  # Initialize solution_time
         self.paths = []
         self.times = []
-
+        self.binary_solution = ""
     def data_cb(self, model, where):
         """
         Callback function for Gurobi's MIP solver.
@@ -45,7 +55,14 @@ class GurobiMIS(Solver):
             if len(self.paths) == 0 or self.paths[-1] < cur_obj:
                 self.times.append(self.solution_time)
                 self.paths.append(cur_obj)
-
+        if where == GRB.Callback.MIPSOL:
+            obj = model.cbGet(GRB.Callback.MIPSOL_OBJ)
+            runtime = model.cbGet(GRB.Callback.RUNTIME)
+            print(f"New incumbent solution found at {runtime:.2f} seconds with objective {obj:.6f}")
+            solution = model.cbGetSolution(model.getVars())
+            indices = [i for i, x in enumerate(solution) if x == 1.0]
+            print(indices)
+            #print(indices_to_dense_binary_string(indices, self.G.number_of_nodes()))
     def solve(self):
         """
         Executes the Gurobi solver to find the Maximum Independent Set (MIS) of the graph.
@@ -66,7 +83,8 @@ class GurobiMIS(Solver):
         """
         # Create a new Gurobi model
         self.model = Model("Maximum_Independent_Set")
-
+        self.model.setParam('Threads', 4)  
+        # self.model.params.MIPFocus=1
         # Set the time limit if specified
         if self.time_limit is not None:
             self.model.setParam("TimeLimit", self.time_limit)
@@ -89,6 +107,7 @@ class GurobiMIS(Solver):
 
         # Optimize the model
         self._start_timer()
+        self.model.write("./model.lp")
         self.model.optimize(callback=self.data_cb)
         self.solution_time = self.model.Runtime
 
@@ -99,19 +118,19 @@ class GurobiMIS(Solver):
             ]
             self.solution["size"] = sum(self.solution["graph_mask"])
             print(f"Maximum Independent Set size: {self.solution['size']}")
+            print(self.solution["graph_mask"])
         else:
             print("No valid solution found.")
             self.solution["graph_mask"] = []
             self.solution["size"] = 0
 
         print(self.paths, self.times)
-
-        # Optional: Output the variables if the solution was found
-        if self.model.status == GRB.OPTIMAL:
-            print("Nodes in the independent set:")
-            for node in self.G.nodes:
-                if node_vars[node].X > 0.5:  # effectively checking if the variable is 1
-                    print(node)
+        # # Optional: Output the variables if the solution was found
+        # if self.model.status == GRB.OPTIMAL:
+        #     print("Nodes in the independent set:")
+        #     for node in self.G.nodes:
+        #         if node_vars[node].X > 0.5:  # effectively checking if the variable is 1
+        #             print(node)
 
 if __name__ == "__main__":
     # Create a simple example graph

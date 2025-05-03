@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 import numpy
 import networkx
+import pandas as pd
 
 module_directory = os.path.dirname(os.path.abspath(__file__))
 
@@ -20,7 +21,7 @@ class ReduMIS(Solver):
             - time_limit (int, optional): Time limit (in seconds) for the algorithm to run. Defaults to None.
             - redumis_path (str, optional): Path to the ReduMIS executable. Defaults to "../external/redumis".
     """
-    def __init__(self, G, params):
+    def __init__(self, G, G_name, params):
         """
         Initializes the ReduMIS solver with the given graph and parameters.
 
@@ -30,12 +31,14 @@ class ReduMIS(Solver):
         """
         super().__init__()
         self.G = G
+        self.graph_name = G_name
         self.seed = params.get("seed", None)
         self.time_limit = params.get("time_limit", None)
         self.redumis_path = params.get(
             "redumis_path", os.path.join(module_directory, "../external/redumis")
         )
         self.solution = {}
+        self.dataset = params.get("dataset", None)
 
     def solve(self):
         """
@@ -96,6 +99,11 @@ class ReduMIS(Solver):
             result.pop()  # Remove the last empty line
             self.solution["graph_mask"] = numpy.array(result, dtype=int)
             self.solution["size"] = numpy.count_nonzero(self.solution["graph_mask"] == 1)
+            best_MIS_list = numpy.nonzero(self.solution["graph_mask"])[0]
+            df = pd.DataFrame(best_MIS_list)
+            dir_path = f'./intermediate_results/{self.dataset}'
+            os.makedirs(dir_path, exist_ok=True)
+            df.to_csv(f'{dir_path}/{self.graph_name}.csv', index=False, header=False)
 
         # Clean up temporary files
         temp_graph_os_path.unlink(missing_ok=True)

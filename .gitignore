@@ -29,3 +29,5 @@ CMakeUserPresets.json
 detect*
 pcqo_mis
 benchmark.log
+
+*.gpickle

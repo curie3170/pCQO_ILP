@@ -5,6 +5,12 @@
 
 #include <string>
 
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <cstring>
+#include <limits.h>
+
+
 // SATLIB settings
 // #define LEARNING_RATE 0.0003
 // #define MOMENTUM 0.875
@@ -38,7 +44,7 @@ int BATCH_SIZE;
 float STD;
 int OUTPUT_INTERVAL;
 std::string INITIALIZATION_VECTOR;
-
+int tuning_num_iter;
 // Function to parse user input and set the global variables
 
 torch::TensorOptions default_tensor_options = torch::TensorOptions().dtype(torch::kFloat16);
@@ -58,13 +64,17 @@ public:
     }
     torch::Tensor sample(torch::Tensor matrix)
     {
-        torch::Tensor sample = torch::normal_out(matrix, mean_vector, STD, std::nullopt);
+        auto std_tensor = torch::full_like(mean_vector, STD);
+        //torch::Tensor sample = torch::normal_out(matrix, mean_vector, STD, std::nullopt);
+        torch::Tensor sample = torch::normal_out(matrix, mean_vector, std_tensor);
         return sample;
     }
     torch::Tensor sample_previous(torch::Tensor matrix)
     {
         mean_vector = matrix.clone();
-        torch::Tensor sample = torch::normal_out(matrix, mean_vector, STD, std::nullopt);
+        auto std_tensor = torch::full_like(mean_vector, STD);
+        //torch::Tensor sample = torch::normal_out(matrix, mean_vector, STD, std::nullopt);
+        torch::Tensor sample = torch::normal_out(matrix, mean_vector, std_tensor);
         return sample;
     }
 };
@@ -216,18 +226,21 @@ struct Parameters
     float std;
 };
 
-std::vector<Parameters> FindParameterRange(std::string file_path)
+// std::vector<Parameters> FindParameterRange(std::string file_path)
+//std::pair<std::vector<Parameters>, int> FindParameterRange(std::string file_path)
+std::pair<std::vector<Parameters>, int> FindParameterRange(const std::string& file_path, int tuning_num_iter=1000)
 {
     std::vector<Parameters> best_params_list;
     float best_score = 0;
 
     // Define the ranges for the grid search
-    std::vector<float> learning_rates = {0.5, 0.05, 0.005, 0.0005, 0.0001, 0.00001, 0.00009, 0.000001, 0.0000001};
+    std::vector<float> learning_rates = {0.5, 0.05, 0.005, 0.0005, 0.0001, 0.00001, 0.000001, 0.0000001};
+    //std::vector<float> learning_rates = {0.05, 0.005, 0.0005, 0.0001, 0.00001, 0.00009, 0.000001, 0.000009, 0.0000001};
     std::vector<float> momentums = {0.99, 0.9, 0.7};
     std::vector<int> gammas = {250, 500, 1000};
-    std::vector<int> gamma_primes = {1, 3, 5};
+    std::vector<int> gamma_primes = {3, 5, 7};
     int num_iterations_per_batch = 500;
-    int num_iterations = 1000;
+    int num_iterations = tuning_num_iter; //225000;
     int batch_size = 256;
     float std = 2.25;
 
@@ -241,6 +254,7 @@ std::vector<Parameters> FindParameterRange(std::string file_path)
     // total number of iterations
     int total_iterations = learning_rates.size() * momentums.size() * gammas.size() * gamma_primes.size();
     int current_iteration = 0;
+    int total_run = 0;
 
     while (best_params_list.size() == 0)
     {
@@ -307,6 +321,7 @@ std::vector<Parameters> FindParameterRange(std::string file_path)
                 }
             }
         }
+        total_run += num_iterations * total_iterations;
         if (best_params_list.size() == 0)
         {
             current_iteration = 0;
@@ -320,7 +335,95 @@ std::vector<Parameters> FindParameterRange(std::string file_path)
     }
 
     // Return the best parameters list
-    return best_params_list;
+    return {best_params_list, total_run};
+}
+
+bool directoryExists(const std::string& path) {
+    struct stat info;
+    return stat(path.c_str(), &info) == 0 && (info.st_mode & S_IFDIR);
+}
+
+bool createDirectories(const std::string& path) {
+    char temp[PATH_MAX];
+    std::strncpy(temp, path.c_str(), sizeof(temp));
+    temp[sizeof(temp) - 1] = '\0';
+
+    for (char* p = temp + 1; *p; ++p) {
+        if (*p == '/') {
+            *p = '\0';
+            if (!directoryExists(temp)) {
+                if (mkdir(temp, 0755) != 0 && errno != EEXIST) {
+                    perror("mkdir");
+                    return false;
+                }
+            }
+            *p = '/';
+        }
+    }
+
+    if (!directoryExists(temp)) {
+        if (mkdir(temp, 0755) != 0 && errno != EEXIST) {
+            perror("mkdir");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+std::string convertPathToCSV(const std::string& file_path, int tuning_iter) {
+    std::string new_path = file_path;
+
+    // "graphs/" -> "fast_tune/"
+    size_t graphs_pos = new_path.find("/graphs/");
+    if (graphs_pos != std::string::npos) {
+        new_path.replace(graphs_pos, 8, "/fast_tune/");
+    }
+    // ".clq" -> "_{tuning_iter}.csv"
+    size_t ext_pos = new_path.rfind(".clq");
+    if (ext_pos != std::string::npos) {
+        std::string suffix = "_tuningiter" + std::to_string(tuning_iter) + ".csv";
+        new_path.replace(ext_pos, 4, suffix);
+    }
+
+    //create directory
+    size_t last_slash = new_path.rfind('/');
+    if (last_slash != std::string::npos) {
+        std::string dir_path = new_path.substr(0, last_slash);
+        createDirectories(dir_path); 
+    }
+
+    return new_path;
+}
+
+void append_mis_column_to_csv(const std::string& csv_filename, int max_mis_value) {
+    std::ifstream infile(csv_filename);
+    if (!infile.is_open()) {
+        std::cerr << "Failed to open CSV for reading: " << csv_filename << std::endl;
+        return;
+    }
+
+    std::stringstream buffer;
+    std::string line;
+    bool is_header = true;
+
+    while (std::getline(infile, line)) {
+        if (is_header) {
+            buffer << line << ",10stepMIS\n";
+            is_header = false;
+        } else {
+            buffer << line << "," << max_mis_value << "\n";
+        }
+    }
+    infile.close();
+
+    std::ofstream outfile(csv_filename);
+    if (!outfile.is_open()) {
+        std::cerr << "Failed to open CSV for writing: " << csv_filename << std::endl;
+        return;
+    }
+    outfile << buffer.str();
+    outfile.close();
 }
 
 void parse_user_input(int argc, const char *argv[])
@@ -343,9 +446,17 @@ void parse_user_input(int argc, const char *argv[])
         if (argc > 1)
         {
             FILE_PATH = argv[1];
+            tuning_num_iter = std::stoi(argv[2]);
             std::cout << "Not enough parameters provided, performing grid search to find appropriate parameters" << std::endl;
-
-            std::vector<Parameters> parameters = FindParameterRange(FILE_PATH);
+            auto start_tune = std::chrono::high_resolution_clock::now();
+            //std::vector<Parameters> parameters = FindParameterRange(FILE_PATH);
+            auto result = FindParameterRange(FILE_PATH, tuning_num_iter);
+            auto end_tune = std::chrono::high_resolution_clock::now();
+            std::vector<Parameters> parameters = result.first;
+            int total_run = result.second;
+            
+            std::chrono::duration<double> tuning_seconds = end_tune - start_tune;
+            std::cout << "tuning time: " << tuning_seconds.count() << " sec" << std::endl;
             if (!parameters.empty())
             {
                 float min_learning_rate = parameters[0].learning_rate, max_learning_rate = parameters[0].learning_rate;
@@ -407,6 +518,28 @@ void parse_user_input(int argc, const char *argv[])
                 std::cout << "Std: " << STD << std::endl;
                 std::cout << "Num iterations per batch: " << NUM_ITERATIONS_PER_BATCH << std::endl;
                 std::cout << "Num iterations: " << NUM_ITERATIONS << std::endl;
+
+                std::string csv_filename = convertPathToCSV(FILE_PATH, tuning_num_iter);
+                
+                std::ofstream csvFile(csv_filename);
+                if (!csvFile.is_open()) {
+                    std::cerr << "Unable to open CSV: " << csv_filename << "\n";
+                    exit(1);
+                }
+                csvFile << "LearningRate,Momentum,Gamma,GammaPrime,BatchSize,Std,NumIterPerBatch,NumIterations,TuningTime,TuningRun\n";
+                csvFile << LEARNING_RATE << ","
+                        << MOMENTUM << ","
+                        << GAMMA << ","
+                        << GAMMA_PRIME << ","
+                        << BATCH_SIZE << ","
+                        << STD << ","
+                        << NUM_ITERATIONS_PER_BATCH << ","
+                        << NUM_ITERATIONS << ","
+                        << tuning_seconds.count() << ","
+                        << total_run << "\n";
+
+                csvFile.close();
+                std::cout << "CSV Saved: " << csv_filename << "\n";
             }
             else
             {
@@ -430,7 +563,7 @@ int main(int argc, const char *argv[])
 {
     int sum_max = 0;
     int count = 0;
-
+    
     parse_user_input(argc, argv);
 
     std::cout << FILE_PATH << "-" << GAMMA << "-" << LEARNING_RATE << "-" << GAMMA_PRIME << std::endl;
@@ -458,7 +591,7 @@ int main(int argc, const char *argv[])
 
     torch::Tensor ones_vector = torch::ones({number_of_nodes}, default_tensor_options_gpu);
     torch::Tensor update = number_of_nodes * adjacency_matrix - adjacency_matrix_comp;
-
+    std::chrono::duration<double> elapsed_seconds;
     for (int iteration = 0; iteration < NUM_ITERATIONS; iteration++)
     {
         torch::Tensor gradient = optimizer.compute_gradient(adjacency_matrix, adjacency_matrix_comp, X);
@@ -493,7 +626,8 @@ int main(int argc, const char *argv[])
             if (iteration + 1 == NUM_ITERATIONS_PER_BATCH || ((iteration + 1) / NUM_ITERATIONS_PER_BATCH) % OUTPUT_INTERVAL == 0 || iteration + 1 == NUM_ITERATIONS)
             {
                 auto end = std::chrono::high_resolution_clock::now();
-                std::chrono::duration<double> elapsed_seconds = end - start;
+                //std::chrono::duration<double> 
+                elapsed_seconds = end - start;
                 std::cout << (iteration + 1) / NUM_ITERATIONS_PER_BATCH << std::endl;
                 std::cout << max << std::endl;
                 std::cout << elapsed_seconds.count() << std::endl;
@@ -502,14 +636,16 @@ int main(int argc, const char *argv[])
             {
                 X = sampler.sample_previous(X);
             }
-            else
-            {
+            if (elapsed_seconds.count() > 30.0) {
+                std::cout << "Time limit exceeded: " << elapsed_seconds.count() << " seconds.\n";
                 // Print the max vector on one line
                 for (int i = 0; i < max_vector.sizes()[0]; i++)
                 {
                     std::cout << max_vector[i].item<float>() << (i == max_vector.sizes()[0] - 1 ? "\n" : " ");
                 }
+                break;
             }
         }
     }
+
 }

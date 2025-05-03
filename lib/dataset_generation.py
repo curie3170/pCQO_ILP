@@ -25,6 +25,7 @@ def assemble_dataset_from_gpickle(graph_directories, choose_n=None):
                             "data": nx.relabel.convert_node_labels_to_integers(
                                 G, first_label=0
                             ),
+                            "dir": graph_directory,
                         }
                     )
     return dataset
