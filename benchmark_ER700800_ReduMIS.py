@@ -178,7 +178,7 @@ for graph in tqdm.tqdm(dataset, desc=" Iterating Through Graphs", position=0):
                 solutions.append(pretty_solution)
         else:
             solution = {
-                "solution_method": solver["name"],
+                "solution_method": f'{solver["name"]} {solver["params"]["dataset"]}',
                 "dataset_name": graph["name"],
                 "data": deepcopy(solver_instance.solution),
                 "time_taken": deepcopy(solver_instance.solution_time),

@@ -28,12 +28,19 @@ SOLUTION_SAVE_INTERVAL = 1
 # List of directories containing graph data
 graph_directories = [
     #"./graphs/er_test"#ER-90-100_0.15" #er_test" #ER-10-20_0.15" ER-90-100_0.15
-    #"./graphs/er_test2"
-    "./graphs/er_700-800",
+    # "./graphs/er_test"
+    #"./graphs/er_700-800",
     # "./graphs/er_graphs/N_1000",
     # "./graphs/er_graphs/N_1500",
     # "./graphs/er_graphs/N_2500",
     # "./graphs/er_graphs/N_3000"
+    "./graphs/er_graphs/N_2000/10",
+    "./graphs/er_graphs/N_2000/20",
+    "./graphs/er_graphs/N_2000/30",
+    "./graphs/er_graphs/N_2000/40",
+    "./graphs/er_graphs/N_2000/50",
+    "./graphs/er_graphs/N_2000/60",
+    "./graphs/er_graphs/N_2000/70"
 ]
 
 # Assemble dataset from .gpickle files in the specified directories

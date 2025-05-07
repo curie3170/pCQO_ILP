@@ -150,7 +150,7 @@ class pCQOMIS_MGD(Solver):
         self.value_initializer_std = params.get("value_initializer_std", 2.25)
         self.test_runtime = params.get("test_runtime", False)
         self.save_sample_path = params.get("save_sample_path", False)
-        self.confidence_th = params.get("confidence_th", 0)
+        # self.confidence_th = params.get("confidence_th", 0)
         #self.momentum = params.get("momentum", 0.9)
         self.sample_previous_batch_best = params.get("sample_previous_batch_best", False)
 
@@ -417,9 +417,9 @@ class pCQOMIS_MGD(Solver):
                     os.makedirs(dir_path, exist_ok=True)
                     df.to_csv(f'{dir_path}/{self.graph_name}_{iteration_t+1}.csv', index=False, header=False) 
                     df.to_csv(f'{dir_path}/{self.graph_name}.csv', index=False, header=False) 
-                    if self.confidence_th > 0:
-                        df2 = pd.DataFrame(best_MIS_masked.cpu().numpy())
-                        df2.to_csv(f'{dir_path}/{self.graph_name}_{iteration_t+1}_confidence{self.confidence_th}.csv', index=False, header=False) 
+                    # if self.confidence_th > 0:
+                    #     df2 = pd.DataFrame(best_MIS_masked.cpu().numpy())
+                    #     df2.to_csv(f'{dir_path}/{self.graph_name}_{iteration_t+1}_confidence{self.confidence_th}.csv', index=False, header=False) 
                                     
                 if self.test_runtime:
                     torch.cuda.synchronize()

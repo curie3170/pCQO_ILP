@@ -1,0 +1,39 @@
+python auto_ILP+finetune_er_N_p.py er_graphs/N_3000/10
+python auto_ILP+finetune_er_N_p.py er_graphs/N_3000/20
+python auto_ILP+finetune_er_N_p.py er_graphs/N_3000/30
+python auto_ILP+finetune_er_N_p.py er_graphs/N_3000/40
+python auto_ILP+finetune_er_N_p.py er_graphs/N_3000/50
+python auto_ILP+finetune_er_N_p.py er_graphs/N_3000/60
+python auto_ILP+finetune_er_N_p.py er_graphs/N_3000/70
+
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2500/10
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2500/20
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2500/30
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2500/40
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2500/50
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2500/60
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2500/70
+
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2000/10
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2000/20
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2000/30
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2000/40
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2000/50
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2000/60
+python auto_ILP+finetune_er_N_p.py er_graphs/N_2000/70
+
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1500/10
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1500/20
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1500/30
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1500/40
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1500/50
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1500/60
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1500/70
+
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1000/10
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1000/20
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1000/30
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1000/40
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1000/50
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1000/60
+python auto_ILP+finetune_er_N_p.py er_graphs/N_1000/70

@@ -31,3 +31,4 @@ pcqo_mis
 benchmark.log
 
 *.gpickle
+*.log

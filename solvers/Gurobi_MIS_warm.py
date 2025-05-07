@@ -3,6 +3,10 @@ from gurobipy import Model, GRB, quicksum
 from lib.Solver import Solver
 import pandas as pd
 import numpy as np
+import os
+import logging
+
+logger = logging.getLogger(__name__)
 class GurobiMIS_warm(Solver):
     """
     A solver class for finding the Maximum Independent Set (MIS) of a graph using the Gurobi optimization solver.
@@ -26,7 +30,7 @@ class GurobiMIS_warm(Solver):
         self.dataset = params.get("dataset", None)
         self.iteration = params.get("iteration", 0)
         self.warm_sample_rate = params.get("warm_sample_rate", 1.0)
-        self.confidence_th = params.get("confidence_th", 0)
+        # self.confidence_th = params.get("confidence_th", 0)
         self.solution = {}
         self.model = None
         self.solution_time = None  # Initialize solution_time
@@ -96,10 +100,15 @@ class GurobiMIS_warm(Solver):
                 self.model.addConstr(node_vars[u] + node_vars[v] <= 1, f"edge_{u}_{v}")
 
         # Initialize with intermediate values
-        if (self.dataset is not None) and (self.iteration is not 0) and (self.confidence_th > 0):
-            df = pd.read_csv(f'./intermediate_results/{self.dataset}/{self.graph_name}_{self.iteration}_confidence{self.confidence_th}.csv')
-        elif (self.dataset is not None) and (self.iteration is not 0):
-            df = pd.read_csv(f'./intermediate_results/{self.dataset}/{self.graph_name}_{self.iteration}.csv')
+        # if (self.dataset is not None) and (self.iteration is not 0) and (self.confidence_th > 0):
+        #     df = pd.read_csv(f'./intermediate_results/{self.dataset}/{self.graph_name}_{self.iteration}_confidence{self.confidence_th}.csv')
+        if (self.dataset is not None) and (self.iteration is not 0):
+            csv_path = f'./intermediate_results/{self.dataset}/{self.graph_name}_{self.iteration}.csv'
+            if os.path.exists(csv_path) and os.path.getsize(csv_path) > 0:
+                df = pd.read_csv(csv_path)
+            else:
+                logger.warning("CSV not found or empty: %s", csv_path)
+                df = pd.DataFrame()
         elif (self.dataset is not None) and (self.iteration is 0):
             df = pd.read_csv(f'./intermediate_results/{self.dataset}/{self.graph_name}.csv')
         else:

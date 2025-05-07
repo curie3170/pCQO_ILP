@@ -5,7 +5,10 @@ import torch
 from datetime import datetime
 import logging
 import tqdm
-
+import sys
+import os
+import glob
+import csv
 from lib.dataset_generation import assemble_dataset_from_gpickle
 from solvers.pCQO_MIS import pCQOMIS_MGD
 from solvers.CPSAT_MIS import CPSATMIS
@@ -14,11 +17,9 @@ from solvers.Gurobi_MIS_warm import GurobiMIS_warm
 # from solvers.KaMIS import ReduMIS
 # from solvers.previous_work_MIS_dNNs import DNNMIS
 
-import os
-
-os.environ["GUROBI_HOME"] = "/export2/curiekim/gurobi1200/linux64"
+os.environ["GUROBI_HOME"] = "/export3/curiekim/gurobi1200/linux64"
 os.environ["LD_LIBRARY_PATH"] = f"{os.environ.get('GUROBI_HOME')}/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
-os.environ["GRB_LICENSE_FILE"] = "/export2/curiekim/gurobi.lic"
+os.environ["GRB_LICENSE_FILE"] = "/export3/curiekim/gurobi.lic"
 
 
 logger = logging.getLogger(__name__)
@@ -29,33 +30,46 @@ SOLUTION_SAVE_INTERVAL = 1
 
 #### GRAPH IMPORT ####
 
+#### LOAD FAST TUNED HYPERPARAMETERS ####
+def extract_params_from_csv(graph_dir):
+    norm_graph_dir = os.path.normpath(graph_dir)
+    if "graphs" not in norm_graph_dir:
+        raise ValueError("Expected 'graphs' in the graph directory path.")
+
+    relative_suffix = norm_graph_dir.split("graphs" + os.sep, 1)[1]  # er_graphs/N_3000/10
+    csv_dir = os.path.normpath(os.path.join("..", "fobc", "fast_tune", relative_suffix)) # ../fobc/er_graphs/N_3000/10
+
+    csv_files = sorted(glob.glob(os.path.join(csv_dir, "*.csv")))
+    if not csv_files:
+        raise FileNotFoundError(f"No CSV files found in {csv_dir}")
+    csv_path = csv_files[0]
+    with open(csv_path, newline='') as f:
+        reader = csv.DictReader(f)
+        row = next(reader)
+        lr = float(row["LearningRate"])
+        mom = float(row["Momentum"])
+        gamma = int(row["Gamma"])
+        gamma_prime = int(row["GammaPrime"])
+    return lr, mom, gamma, gamma_prime
+
+def get_dataset_name_from_path(graph_dir, lr, mom, gamma, gamma_prime):
+
+    return f"fastpCQO_er_700-800_133200steps_{lr}_{mom}_{gamma}_{gamma_prime}"
+ 
+
 # List of directories containing graph data
 graph_directories = [
-    ### ER 700-800 Graphs ###
-    "./graphs/er_test" #r_700-800"
-    ### GNM 300 Convergence Graphs ###
-    # "./graphs/gnm_random_graph_convergence",
-    ### SATLIB Graphs ###
-    #"./graphs/satlib/m403",
-    #"./graphs/satlib/m411",
-    # "./graphs/satlib/m418",
-    # "./graphs/satlib/m423",
-    # "./graphs/satlib/m429",
-    # "./graphs/satlib/m435",
-    # "./graphs/satlib/m441",
-    # "./graphs/satlib/m449",
-    ### ER density test Graphs ###
-    # "./graphs/er_05",
-    # "./graphs/er_10",
-    # "./graphs/er_15",
-    # "./graphs/er_20"
+    "./graphs/er_700-800"
 ]
 
 # Assemble dataset from .gpickle files in the specified directories
 dataset = assemble_dataset_from_gpickle(graph_directories)
 
+# set fast tuned hyperparameters
+lr, mom, gamma, gamma_prime = extract_params_from_csv(graph_directories[0])
+intermediate_results = get_dataset_name_from_path(graph_directories[0], lr, mom, gamma, gamma_prime)
+    
 #### SOLVER DESCRIPTION ####
-# 여기다가 dataset 중 5개 추출해서 c++로 5개 셋의 hyperparams list 뽑음..
 
 # Define solvers and their parameters
 base_solvers = [
@@ -63,25 +77,25 @@ base_solvers = [
         "name": "pCQO_MIS ER 700-800 MGD",
         "class": pCQOMIS_MGD,
         "params": {
-            "set_of_params": [[0.0001, 0.99, 250, 3],],
+            "set_of_params": [[lr, mom, gamma, gamma_prime]],
             # "learning_rate": 0.000009,
             # "momentum": 0.9,
-            "number_of_steps": 225000, 
+            "number_of_steps": 133200,#225000, 
             # "gamma": 350,
             # "gamma_prime": 7,
             "batch_size": 256,
             "std": 2.25,
             "threshold": 0.00,
             "steps_per_batch": 450,
-            "output_interval": 225002,
+            "output_interval": 133202, #225002,
             "value_initializer": "degree",
-            "checkpoints": [450] + list(range(4500, 225002, 4500)),
-            "time_limit": 30,
-            "dataset": "er_700-800_30sec", #er_dense
+            "checkpoints": [450] + list(range(4500, 133202, 4500)), #225002
+            #"time_limit": 30, #don't save checkpoints
+            "dataset": intermediate_results, #er_dense
         },
     },
-    {"name": "Gurobi_warm", "class": GurobiMIS_warm, "params": {"time_limit": 30, "dataset": "er_700-800_30sec", "iteration": 450, "warm_sample_rate": 0.15}},
-    {"name": "Gurobi_warm", "class": GurobiMIS_warm, "params": {"time_limit": 30, "dataset": "er_700-800_30sec", "iteration": 0, "warm_sample_rate": 0.15}}, #pcqo30sec value
+    {"name": "Gurobi_warm", "class": GurobiMIS_warm, "params": {"time_limit": 30, "dataset": intermediate_results, "iteration": 450, "warm_sample_rate": 0.15}},
+    {"name": "Gurobi_warm", "class": GurobiMIS_warm, "params": {"time_limit": 30, "dataset": intermediate_results, "iteration": 133200, "warm_sample_rate": 0.15}}, #pcqo30sec value
 ]
 
 solvers = base_solvers

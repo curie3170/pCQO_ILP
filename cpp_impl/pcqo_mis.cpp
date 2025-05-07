@@ -9,7 +9,7 @@
 #include <sys/types.h>
 #include <cstring>
 #include <limits.h>
-
+#include <sstream>
 
 // SATLIB settings
 // #define LEARNING_RATE 0.0003
@@ -50,6 +50,97 @@ int tuning_num_iter;
 torch::TensorOptions default_tensor_options = torch::TensorOptions().dtype(torch::kFloat16);
 torch::TensorOptions default_tensor_options_gpu = default_tensor_options.device(torch::kCUDA);
 
+namespace fs = std::filesystem;
+#include <torch/torch.h>
+#include <fstream>
+#include <iostream>
+#include <filesystem>
+#include <sstream>
+#include <string>
+
+namespace fs = std::filesystem;
+
+void save_nonzero_indices_csv(
+    torch::Tensor max_vector,
+    const std::string& graph_path_str,
+    float LEARNING_RATE,
+    float MOMENTUM,
+    int GAMMA,
+    int GAMMA_PRIME,
+    int NUM_ITERATIONS_PER_BATCH // pass -1 if none
+)
+{
+    fs::path graph_path(graph_path_str);
+    std::string graph_name = graph_path.stem().string(); // ER_3000_0.30_4
+    fs::path graph_dir = graph_path.parent_path();       // .../graphs/...
+
+    // 1. Find "graphs" root automatically
+    std::vector<std::string> parts;
+    for (const auto& part : graph_dir) {
+        parts.push_back(part.string());
+    }
+
+    std::vector<std::string> graphs_root_parts;
+    std::vector<std::string> relative_parts;
+    bool found_graphs = false;
+
+    for (const auto& part : parts) {
+        if (!found_graphs) {
+            graphs_root_parts.push_back(part);
+            if (part == "graphs") {
+                found_graphs = true;
+            }
+        } else {
+            relative_parts.push_back(part);
+        }
+    }
+
+    if (!found_graphs) {
+        std::cerr << "Failed to detect 'graphs' in path: " << graph_path << std::endl;
+        return;
+    }
+
+    fs::path graphs_root, relative_dir;
+    for (const auto& p : graphs_root_parts) graphs_root /= p;
+    for (const auto& p : relative_parts)    relative_dir /= p;
+    std::string relative_dir_str;
+    for (const auto& part : relative_dir) {
+        if (!relative_dir_str.empty()) relative_dir_str += "_";
+        relative_dir_str += part.string();
+    }
+
+    // 2. Replace "graphs" → "intermediate_results"
+    //fs::path output_base = graphs_root.parent_path() / "intermediate_results";
+    fs::path output_base = "/export3/curiekim/pCQO-mis-benchmark/intermediate_results";
+    // 3. Append params
+    std::ostringstream param_suffix;
+    param_suffix << LEARNING_RATE << "_" << MOMENTUM << "_" << GAMMA << "_" << GAMMA_PRIME;
+
+    fs::path output_dir = output_base / (relative_dir_str + "_" + param_suffix.str());
+    fs::create_directories(output_dir);
+
+    // 4. File name
+    std::string filename = graph_name;
+    if (NUM_ITERATIONS_PER_BATCH != -1)
+        filename += "_" + std::to_string(NUM_ITERATIONS_PER_BATCH);
+    filename += ".csv";
+
+    fs::path output_path = output_dir / filename;
+
+    // Save nonzero indices
+    auto nonzero_indices = torch::nonzero(max_vector).squeeze();
+    std::ofstream outfile(output_path);
+    if (!outfile.is_open()) {
+        std::cerr << "Failed to open: " << output_path << std::endl;
+        return;
+    }
+    for (int i = 0; i < nonzero_indices.size(0); ++i)
+        outfile << nonzero_indices[i].item<int>() << "\n";
+
+    outfile.close();
+    std::cout << "[INFO] Saved to: " << output_path << std::endl;
+}
+
 class InitializationSampler
 {
 private:
@@ -64,7 +155,7 @@ public:
     }
     torch::Tensor sample(torch::Tensor matrix)
     {
-        auto std_tensor = torch::full_like(mean_vector, STD);
+        auto std_tensor = torch::full_like(mean_vector, stdev);
         //torch::Tensor sample = torch::normal_out(matrix, mean_vector, STD, std::nullopt);
         torch::Tensor sample = torch::normal_out(matrix, mean_vector, std_tensor);
         return sample;
@@ -72,10 +163,10 @@ public:
     torch::Tensor sample_previous(torch::Tensor matrix)
     {
         mean_vector = matrix.clone();
-        auto std_tensor = torch::full_like(mean_vector, STD);
+        auto std_tensor = torch::full_like(mean_vector, stdev);
         //torch::Tensor sample = torch::normal_out(matrix, mean_vector, STD, std::nullopt);
         torch::Tensor sample = torch::normal_out(matrix, mean_vector, std_tensor);
-        return sample;
+        return matrix;
     }
 };
 
@@ -225,7 +316,11 @@ struct Parameters
     int batch_size;
     float std;
 };
-
+// int seed_from_params(float lr, float mom, int gamma, int gamma_prime) {
+//     // Hashing
+//     return static_cast<int>(lr * 1e7) + static_cast<int>(mom * 1000) * 1000 +
+//            gamma * 1000000 + gamma_prime * 10000000;
+// }
 // std::vector<Parameters> FindParameterRange(std::string file_path)
 //std::pair<std::vector<Parameters>, int> FindParameterRange(std::string file_path)
 std::pair<std::vector<Parameters>, int> FindParameterRange(const std::string& file_path, int tuning_num_iter=1000)
@@ -235,6 +330,7 @@ std::pair<std::vector<Parameters>, int> FindParameterRange(const std::string& fi
 
     // Define the ranges for the grid search
     std::vector<float> learning_rates = {0.5, 0.05, 0.005, 0.0005, 0.0001, 0.00001, 0.000001, 0.0000001};
+    //std::vector<float> learning_rates = {0.0000001, 0.000001, 0.00001, 0.0001, 0.0005, 0.005, 0.05, 0.5};
     //std::vector<float> learning_rates = {0.05, 0.005, 0.0005, 0.0001, 0.00001, 0.00009, 0.000001, 0.000009, 0.0000001};
     std::vector<float> momentums = {0.99, 0.9, 0.7};
     std::vector<int> gammas = {250, 500, 1000};
@@ -244,18 +340,16 @@ std::pair<std::vector<Parameters>, int> FindParameterRange(const std::string& fi
     int batch_size = 256;
     float std = 2.25;
 
-    torch::manual_seed(113);
+    // torch::manual_seed(113);
     auto [adjacency_matrix, adjacency_matrix_comp, number_of_nodes] = load_graph(file_path);
-
-    torch::Tensor mean_vector = compute_mean_vector(adjacency_matrix, INITIALIZATION_VECTOR, batch_size, number_of_nodes);
-
+    torch::Tensor mean_vector = compute_mean_vector(adjacency_matrix, INITIALIZATION_VECTOR, batch_size, number_of_nodes).clone();
     InitializationSampler sampler = InitializationSampler(mean_vector, std);
 
     // total number of iterations
     int total_iterations = learning_rates.size() * momentums.size() * gammas.size() * gamma_primes.size();
     int current_iteration = 0;
     int total_run = 0;
-
+    
     while (best_params_list.size() == 0)
     {
         for (float lr : learning_rates)
@@ -266,9 +360,12 @@ std::pair<std::vector<Parameters>, int> FindParameterRange(const std::string& fi
                 {
                     for (int gamma_prime : gamma_primes)
                     {
+                        // int seed = seed_from_params(lr, mom, gamma, gamma_prime);
+                        torch::manual_seed(113);
+                        torch::cuda::manual_seed_all(113);
                         // Create initialization matrix and sample from a normal distribution with mean_vector and std
                         torch::Tensor X = sampler.sample(torch::zeros({batch_size, number_of_nodes}, default_tensor_options_gpu));
-
+                        // std::cout << "X: " << X << std::endl;
                         Optimizer optimizer = Optimizer(lr, mom, gamma, gamma_prime, number_of_nodes, batch_size);
 
                         int max = 0;
@@ -280,41 +377,55 @@ std::pair<std::vector<Parameters>, int> FindParameterRange(const std::string& fi
                         for (int iteration = 0; iteration < num_iterations; iteration++)
                         {
                             torch::Tensor gradient = optimizer.compute_gradient(adjacency_matrix, adjacency_matrix_comp, X);
+                            // std::cout << "grad norm: " << gradient.norm().item<float>() << std::endl;
                             X = optimizer.velocity_update(X, gradient);
-
                             // Clamp the initialization matrix to be between 0 and 1
                             X = X.clamp(0, 1);
-
+                            // std::cout << "X after clamp (mean, min, max): "
+                            //           << X.mean().item<float>() << ", "
+                            //           << X.min().item<float>() << ", "
+                            //           << X.max().item<float>() << std::endl;
                             if ((iteration + 1) % num_iterations_per_batch == 0)
                             {
                                 torch::Tensor masks = X.gt(0.5).to(torch::kFloat16);
-
+                                
                                 for (int i = 0; i < masks.sizes()[0]; i++)
                                 {
                                     torch::Tensor binarized_update = masks[i] - 0.1 * (-ones_vector + masks[i].matmul(update));
                                     binarized_update.clamp_(0, 1);
                                     if (torch::equal(binarized_update, masks[i]))
                                     {
+                                        // std::cout << "mis: " << masks[i].sum().item<float>() << std::endl;
                                         if (masks[i].sum().item<float>() > max)
                                         {
+                                            // std::cout << "max: " << max << std::endl;
                                             max = masks[i].sum().item<float>();
+                                            // std::cout << "new max: " << max << std::endl;
 
                                             // Clear the best parameters list and add the new best parameters
                                             if (max > best_score)
                                             {
                                                 best_score = max;
                                                 best_params_list.clear();
+                                                // std::cout << "new best_score: " << best_score << std::endl;
                                             }
 
                                             // Add the current parameters to the list if they match the best score
                                             if (max == best_score)
                                             {
+                                                std::cout << "max == best_score: " << best_score << std::endl;
                                                 best_params_list.push_back({lr, mom, num_iterations_per_batch, gamma, gamma_prime, batch_size, std});
+                                                std::cout << "best hyperparameters:\n";
+                                                for (const auto& param : best_params_list) {
+                                                    std::cout << param.learning_rate << ", " << param.momentum  << ", " << param.gamma  << ", " << param.gamma_prime << std::endl; 
+                                                }
                                             }
                                         }
                                     }
                                 }
+                                // auto old_X = X.clone();
                                 X = sampler.sample_previous(X);
+                                // std::cout << "X diff: " << torch::mean(torch::abs(X - old_X)).item<float>() << std::endl;
                             }
                         }
                     }
@@ -324,13 +435,15 @@ std::pair<std::vector<Parameters>, int> FindParameterRange(const std::string& fi
         total_run += num_iterations * total_iterations;
         if (best_params_list.size() == 0)
         {
-            current_iteration = 0;
-            num_iterations_per_batch = num_iterations_per_batch * 2;
-            num_iterations = num_iterations * 2;
-            gammas.push_back(gammas[gammas.size() - 1] * 2);
-            std::cout << "No parameters found, increasing gamma and num_iterations_per_batch" << std::endl;
-            std::cout << "Increasing gamma to: " << gammas[gammas.size() - 1] << std::endl;
-            std::cout << "Increasing num_iterations_per_batch to: " << num_iterations_per_batch << std::endl;
+            // current_iteration = 0;
+            // num_iterations_per_batch = num_iterations_per_batch * 2;
+            // num_iterations = num_iterations * 2;
+            // gammas.push_back(gammas[gammas.size() - 1] * 2);
+            // std::cout << "No parameters found, increasing gamma and num_iterations_per_batch" << std::endl;
+            // std::cout << "Increasing gamma to: " << gammas[gammas.size() - 1] << std::endl;
+            // std::cout << "Increasing num_iterations_per_batch to: " << num_iterations_per_batch << std::endl;
+            std::cout << "No parameters found" << std::endl;
+            break;
         }
     }
 
@@ -382,7 +495,7 @@ std::string convertPathToCSV(const std::string& file_path, int tuning_iter) {
     // ".clq" -> "_{tuning_iter}.csv"
     size_t ext_pos = new_path.rfind(".clq");
     if (ext_pos != std::string::npos) {
-        std::string suffix = "_tuningiter" + std::to_string(tuning_iter) + ".csv";
+        std::string suffix = "_tuningiter" + std::to_string(tuning_iter) + "_unfixed.csv";
         new_path.replace(ext_pos, 4, suffix);
     }
 
@@ -495,9 +608,10 @@ void parse_user_input(int argc, const char *argv[])
                 std::cout << "Num iterations per batch: [" << min_num_iterations_per_batch << ", " << max_num_iterations_per_batch << "]" << std::endl;
 
                 // Pick a set of parameters in the middle of the list
+                // why??
                 size_t middle_index = parameters.size() / 2;
                 const auto &selected_param = parameters[middle_index];
-
+                
                 // Set the global variables to the selected parameters
                 LEARNING_RATE = selected_param.learning_rate;
                 MOMENTUM = selected_param.momentum;
@@ -506,7 +620,7 @@ void parse_user_input(int argc, const char *argv[])
                 GAMMA_PRIME = selected_param.gamma_prime;
                 BATCH_SIZE = selected_param.batch_size;
                 STD = selected_param.std;
-                NUM_ITERATIONS = NUM_ITERATIONS_PER_BATCH * 10;
+                NUM_ITERATIONS = NUM_ITERATIONS_PER_BATCH * 1000;
                 OUTPUT_INTERVAL = 1;
 
                 std::cout << "Selected parameters:" << std::endl;
@@ -581,8 +695,6 @@ int main(int argc, const char *argv[])
     // Create initilzation matrix and sample from a normal distribution with mean_vector and std 0.01
     torch::Tensor X = sampler.sample(torch::zeros({BATCH_SIZE, number_of_nodes}, default_tensor_options_gpu));
 
-    // //std::cout << "Initialization matrix: " << X << std::endl;
-
     Optimizer optimizer = Optimizer(LEARNING_RATE, MOMENTUM, GAMMA, GAMMA_PRIME, number_of_nodes, BATCH_SIZE);
 
     int max = 0;
@@ -599,7 +711,7 @@ int main(int argc, const char *argv[])
 
         // Clamp the initialization matrix to be between 0 and 1
         X = X.clamp(0, 1);
-
+        
         if ((iteration + 1) % NUM_ITERATIONS_PER_BATCH == 0)
         {
             torch::Tensor masks = X.gt(0.5).to(torch::kFloat16);
@@ -614,6 +726,7 @@ int main(int argc, const char *argv[])
                 binarized_update.clamp_(0, 1);
                 if (torch::equal(binarized_update, masks[i]))
                 {
+                    // std::cout << "mis: " << masks[i].sum().item<float>() << std::endl;
                     if (masks[i].sum().item<float>() > max)
                     {
                         max = masks[i].sum().item<float>();
@@ -622,7 +735,10 @@ int main(int argc, const char *argv[])
                 }
                 // }
             }
-
+            if (iteration + 1 == NUM_ITERATIONS_PER_BATCH)
+            {
+                save_nonzero_indices_csv(max_vector, FILE_PATH, LEARNING_RATE, MOMENTUM, GAMMA, GAMMA_PRIME, NUM_ITERATIONS_PER_BATCH);
+            }
             if (iteration + 1 == NUM_ITERATIONS_PER_BATCH || ((iteration + 1) / NUM_ITERATIONS_PER_BATCH) % OUTPUT_INTERVAL == 0 || iteration + 1 == NUM_ITERATIONS)
             {
                 auto end = std::chrono::high_resolution_clock::now();
@@ -643,6 +759,7 @@ int main(int argc, const char *argv[])
                 {
                     std::cout << max_vector[i].item<float>() << (i == max_vector.sizes()[0] - 1 ? "\n" : " ");
                 }
+                save_nonzero_indices_csv(max_vector, FILE_PATH, LEARNING_RATE, MOMENTUM, GAMMA, GAMMA_PRIME, -1);
                 break;
             }
         }
